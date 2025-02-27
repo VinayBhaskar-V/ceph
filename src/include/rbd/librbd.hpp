@@ -27,6 +27,7 @@
 #include <condition_variable>
 
 #include "../librbd/AsioEngine.h"
+#include "cls/rbd/cls_rbd_types.h"
 
 #if __GNUC__ >= 4
   #pragma GCC diagnostic push
@@ -561,6 +562,9 @@ public:
                       size_t group_snap_info_size);
   int group_snap_list2(IoCtx& group_ioctx, const char *group_name,
                        std::vector<group_snap_info2_t> *snaps);
+  int group_snap_list3(IoCtx& group_ioctx, const std::string& group_id,
+                       bool try_to_sort, bool fail_if_not_sorted,
+                       std::vector<cls::rbd::GroupSnapshot>&snaps);
   int group_snap_get_info(IoCtx& group_ioctx, const char *group_name,
                           const char *snap_name,
                           group_snap_info2_t *group_snap);

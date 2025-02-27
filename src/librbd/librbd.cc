@@ -1671,6 +1671,14 @@ namespace librbd {
                                            false, snaps);
   }
 
+  int RBD::group_snap_list3(librados::IoCtx& group_ioctx, const std::string& group_id,
+                            bool try_to_sort, bool fail_if_not_sorted,
+                            std::vector<cls::rbd::GroupSnapshot>&snaps)
+  {
+    return librbd::api::Group<>::group_snap_list_main(group_ioctx, group_id, try_to_sort, 
+                                                      fail_if_not_sorted, snaps);
+  }
+
   int RBD::group_snap_get_info(IoCtx& group_ioctx, const char *group_name,
                                const char *snap_name,
                                group_snap_info2_t *group_snap) {

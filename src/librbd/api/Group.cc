@@ -1271,6 +1271,18 @@ int Group<I>::group_image_list_by_id(librados::IoCtx& group_ioctx,
 }
 
 template <typename I>
+int Group<I>::group_snap_list_main(librados::IoCtx& group_ioctx, const std::string& group_id,
+                    bool try_to_sort, bool fail_if_not_sorted,
+                    std::vector<cls::rbd::GroupSnapshot>&snaps){
+  int r =  group_snap_list<I>(group_ioctx, group_id, try_to_sort, fail_if_not_sorted, &snaps);
+  if (r < 0) {
+    std::cout<<"failed to list group snaps"<<std::endl;
+    return r;
+  }
+  return 0;               
+}
+
+template <typename I>
 int Group<I>::group_image_remove(librados::IoCtx& group_ioctx, string group_id,
 		                 librados::IoCtx& image_ioctx,
                                  string image_id) {

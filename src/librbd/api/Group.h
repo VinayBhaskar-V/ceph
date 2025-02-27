@@ -68,6 +68,9 @@ struct Group {
                                 std::string group_id,
                                 librados::IoCtx& image_ioctx,
                                 std::string image_id);
+  static int group_snap_list_main(librados::IoCtx& group_ioctx, const std::string& group_id,
+                                  bool try_to_sort, bool fail_if_not_sorted,
+                                  std::vector<cls::rbd::GroupSnapshot>&snaps);
 
 };
 

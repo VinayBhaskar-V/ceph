@@ -82,6 +82,31 @@ std::string get_group_snap_state_name(rbd_group_snap_state_t state)
   }
 }
 
+std::string get_group_snap_state_name2(cls::rbd::GroupSnapshotState state)
+{
+  switch (state) {
+  case cls::rbd::GROUP_SNAPSHOT_STATE_INCOMPLETE:
+    return "incomplete";
+  case cls::rbd::GROUP_SNAPSHOT_STATE_COMPLETE:
+    return "complete";
+  default:
+    return "unknown (" + stringify(state) + ")";
+  }
+}
+
+std::string get_snap_namespace_name(cls::rbd::GroupSnapshotNamespace SnapshotNamespace)
+{
+  auto snap_type = cls::rbd::get_group_snap_namespace_type(SnapshotNamespace);
+  switch (snap_type) {
+  case cls::rbd::GROUP_SNAPSHOT_NAMESPACE_TYPE_USER:
+    return "user";
+  case cls::rbd::GROUP_SNAPSHOT_NAMESPACE_TYPE_MIRROR:
+    return "mirror";
+  default:
+    return "unknown (" + stringify(snap_type) + ")";
+  }
+}
+
 int execute_create(const po::variables_map &vm,
                    const std::vector<std::string> &ceph_global_init_args) {
   size_t arg_index = 0;
@@ -747,8 +772,12 @@ int execute_group_snap_list(const po::variables_map &vm,
   }
 
   librbd::RBD rbd;
-  std::vector<librbd::group_snap_info2_t> snaps;
-  r = rbd.group_snap_list2(io_ctx, group_name.c_str(), &snaps);
+  std::string group_id;
+  r = rbd.group_get_id(io_ctx, group_name.c_str(), &group_id);
+  std::vector<cls::rbd::GroupSnapshot> snaps;
+
+  r = rbd.group_snap_list3(io_ctx, group_id, false, false,
+                           snaps);
   if (r < 0) {
     return r;
   }
@@ -757,23 +786,83 @@ int execute_group_snap_list(const po::variables_map &vm,
   if (f) {
     f->open_array_section("group_snaps");
   } else {
-    t.define_column("ID", TextTable::LEFT, TextTable::LEFT);
+    t.define_column("SNAPID", TextTable::LEFT, TextTable::LEFT);
     t.define_column("NAME", TextTable::LEFT, TextTable::LEFT);
     t.define_column("STATE", TextTable::LEFT, TextTable::RIGHT);
+    t.define_column("NAMESPACE", TextTable::LEFT, TextTable::LEFT);
   }
 
-  for (const auto& snap : snaps) {
-    auto state_string = get_group_snap_state_name(snap.state);
+    for (auto s = snaps.begin(); s != snaps.end(); ++s) {
+    std::string mirror_snap_state = "unknown";
+    std::string snap_type = get_snap_namespace_name(s->snapshot_namespace);
+    std::string group_state = get_group_snap_state_name2(s->state);
+    auto mirror_snap = std::get_if<cls::rbd::GroupSnapshotNamespaceMirror>(
+                                    &s->snapshot_namespace);
+    if (snap_type == "mirror") {
+        if(mirror_snap != nullptr){
+            switch (mirror_snap->state) {
+                case cls::rbd::MIRROR_SNAPSHOT_STATE_PRIMARY :
+                    mirror_snap_state = "primary";
+                    break;
+                case cls::rbd::MIRROR_SNAPSHOT_STATE_NON_PRIMARY :
+                    mirror_snap_state = "non-primary";
+                    break;
+                case cls::rbd::MIRROR_SNAPSHOT_STATE_PRIMARY_DEMOTED:
+                case cls::rbd::MIRROR_SNAPSHOT_STATE_NON_PRIMARY_DEMOTED:
+                    mirror_snap_state = "demoted";
+                    break;
+            }
+        } 
+    }
+ 
     if (f) {
       f->open_object_section("group_snap");
-      f->dump_string("id", snap.id);
-      f->dump_string("snapshot", snap.name);
-      f->dump_string("state", state_string);
+      f->dump_string("id", s->id);
+      f->dump_string("name", s->name);
+      f->dump_unsigned("state", s->state);
+      f->open_object_section("namespace");
+      f->dump_string("type", get_snap_namespace_name(s->snapshot_namespace));
+      if (snap_type == "user") {
+        f->dump_string("pool", pool_name);
+        f->dump_string("group", group_name);
+        f->dump_string("group snap", s->name);
+      } else if (snap_type == "mirror") {
+        f->dump_string("state", mirror_snap_state);
+        f->open_array_section("mirror_peer_uuids");
+        for (auto &uuid : mirror_snap->mirror_peer_uuids) {
+          f->dump_string("peer_uuid", uuid);
+        }
+        f->close_section();
+        if (mirror_snap->state == cls::rbd::MIRROR_SNAPSHOT_STATE_NON_PRIMARY ||
+            mirror_snap->state == cls::rbd::MIRROR_SNAPSHOT_STATE_NON_PRIMARY_DEMOTED) {
+          f->dump_string("primary_mirror_uuid",
+                          mirror_snap->primary_mirror_uuid);
+        }
+      }
+      f->close_section();
+      
       f->close_section();
     } else {
-      t << snap.id << snap.name << state_string << TextTable::endrow;
-    }
-  }
+      t << s->id << s->name << s->state;
+        std::ostringstream oss;
+        oss << snap_type;
+        if (snap_type == "user") {
+          oss << " (" << pool_name << "/"
+                      << group_name << "@"
+                      << s->name << ")";
+        } else if (snap_type == "mirror") {
+          oss << " (" << mirror_snap_state << " "
+                      << "peer_uuids:[" << mirror_snap->mirror_peer_uuids << "]";
+          if (mirror_snap->state == cls::rbd::MIRROR_SNAPSHOT_STATE_NON_PRIMARY ||
+              mirror_snap->state == cls::rbd::MIRROR_SNAPSHOT_STATE_NON_PRIMARY_DEMOTED) {
+            oss << " " << mirror_snap->primary_mirror_uuid;
+          }
+          oss << ")";
+        }
+        t << oss.str();
+      t << TextTable::endrow;
+     }
+   }
 
   if (f) {
     f->close_section();
