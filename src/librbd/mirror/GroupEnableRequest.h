@@ -123,17 +123,8 @@ private:
   void get_mirror_group();
   void handle_get_mirror_group(int r);
 
-  void get_mirror_peer_list();
-  void handle_get_mirror_peer_list(int r);
-
-  void list_group_images();
-  void handle_list_group_images(int r);
-
-  void check_mirror_images_disabled();
-  void handle_check_mirror_images_disabled(int r);
-
-  void open_images();
-  void handle_open_images(int r);
+  void prepare_group_images();
+  void handle_prepare_group_images(int r);
 
   void validate_images();
 
