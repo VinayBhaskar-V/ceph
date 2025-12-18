@@ -132,6 +132,9 @@ private:
   void get_last_mirror_snapshot_state();
   void handle_get_last_mirror_snapshot_state(int r);
 
+  void prepare_group_images();
+  void handle_prepare_group_images(int r);
+
   void generate_group_snap();
 
   void create_image_snaps();
@@ -145,15 +148,6 @@ private:
 
   void close_images();
   void handle_close_images(int r);
-
-  void get_mirror_peer_list();
-  void handle_get_mirror_peer_list(int r);
-
-  void list_group_images();
-  void handle_list_group_images(int r);
-
-  void open_group_images();
-  void handle_open_group_images(int r);
 
   void set_snap_metadata();
   void handle_set_snap_metadata(int r);

@@ -97,7 +97,7 @@ void GroupDisableRequest<I>::prepare_group_images() {
     &GroupDisableRequest<I>::handle_prepare_group_images>(this);
 
   auto req = snapshot::GroupPrepareImagesRequest<I>::create(m_group_ioctx, m_group_id, m_image_ctxs,
-                                                            m_images, m_mirror_images, &m_is_primary,
+                                                            m_images, &m_mirror_images, &m_is_primary,
                                                             &m_mirror_peer_uuids, &m_images_promotion_states,
                                                             "disable", m_force, ctx);
   req->send();

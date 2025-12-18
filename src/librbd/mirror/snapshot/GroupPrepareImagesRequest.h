@@ -32,7 +32,7 @@ public:
       librados::IoCtx& group_ioctx, const std::string& group_id,
       std::vector<librbd::ImageCtx *>& image_ctxs,
       std::vector<cls::rbd::GroupImageStatus>& images,
-      std::vector<cls::rbd::MirrorImage>& mirror_images,
+      std::vector<cls::rbd::MirrorImage>* mirror_images,
       std::vector<bool>* is_primary,
       std::set<std::string>* mirror_peer_uuids,
       std::vector<mirror::PromotionState>* images_promotion_states,
@@ -47,7 +47,7 @@ public:
     librados::IoCtx& group_ioctx, const std::string& group_id,
     std::vector<librbd::ImageCtx *>& image_ctxs,
     std::vector<cls::rbd::GroupImageStatus>& images,
-    std::vector<cls::rbd::MirrorImage>& mirror_images,
+    std::vector<cls::rbd::MirrorImage>* mirror_images,
     std::vector<bool>* is_primary,
     std::set<std::string>* mirror_peer_uuids,
     std::vector<mirror::PromotionState>* images_promotion_states,
@@ -98,7 +98,7 @@ private:
   std::string m_group_id;
   std::vector<ImageCtx *>& m_image_ctxs;
   std::vector<cls::rbd::GroupImageStatus>& m_images;
-  std::vector<cls::rbd::MirrorImage>& m_mirror_images;
+  std::vector<cls::rbd::MirrorImage>* m_mirror_images;
   std::vector<bool>* m_is_primary; // for disable
   std::set<std::string>* m_mirror_peer_uuids;
   std::vector<mirror::PromotionState>* m_images_promotion_states;

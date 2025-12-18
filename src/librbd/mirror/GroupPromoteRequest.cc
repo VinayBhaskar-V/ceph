@@ -208,7 +208,7 @@ void GroupPromoteRequest<I>::prepare_group_images() {
     &GroupPromoteRequest<I>::handle_prepare_group_images>(this);
 
   auto req = snapshot::GroupPrepareImagesRequest<I>::create(m_group_ioctx, m_group_id, m_image_ctxs,
-                                                            m_images, m_mirror_images, nullptr,
+                                                            m_images, &m_mirror_images, nullptr,
                                                             &m_mirror_peer_uuids, &m_images_promotion_states,
                                                             "promote", m_force, ctx);
   req->send();

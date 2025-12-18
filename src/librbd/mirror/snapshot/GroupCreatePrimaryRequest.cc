@@ -20,6 +20,7 @@
 #include "librbd/mirror/GetInfoRequest.h"
 #include "librbd/mirror/snapshot/CreatePrimaryRequest.h"
 #include "librbd/mirror/snapshot/GroupUnlinkPeerRequest.h"
+#include "librbd/mirror/snapshot/GroupPrepareImagesRequest.h"
 #include "librbd/mirror/Types.h"
 
 #define dout_subsys ceph_subsys_rbd
@@ -280,155 +281,31 @@ void GroupCreatePrimaryRequest<I>::handle_get_last_mirror_snapshot_state(
     return;
   }
 
-  get_mirror_peer_list();
+  prepare_group_images();
 }
 
 template <typename I>
-void GroupCreatePrimaryRequest<I>::get_mirror_peer_list() {
+void GroupCreatePrimaryRequest<I>::prepare_group_images() {
   ldout(m_cct, 10) << dendl;
-
-  m_default_ns_ioctx.dup(m_group_ioctx);
-  m_default_ns_ioctx.set_namespace("");
-
-  librados::ObjectReadOperation op;
-  cls_client::mirror_peer_list_start(&op);
-
-  auto comp = create_rados_callback<
-      GroupCreatePrimaryRequest<I>,
-      &GroupCreatePrimaryRequest<I>::handle_get_mirror_peer_list>(this);
-
-  m_outbl.clear();
-  int r = m_default_ns_ioctx.aio_operate(RBD_MIRRORING, comp, &op, &m_outbl);
-  ceph_assert(r == 0);
-  comp->release();
-}
-
-template <typename I>
-void GroupCreatePrimaryRequest<I>::handle_get_mirror_peer_list(int r) {
-  ldout(m_cct, 10) << "r=" << r << dendl;
-
-  std::vector<cls::rbd::MirrorPeer> peers;
-  if (r == 0) {
-    auto it = m_outbl.cbegin();
-    r = cls_client::mirror_peer_list_finish(&it, &peers);
-  }
-
-  if (r < 0) {
-    lderr(m_cct) << "error listing mirror peers" << cpp_strerror(r) << dendl;
-    finish(r);
-    return;
-  }
-
-  for (auto &peer : peers) {
-    if (peer.mirror_peer_direction == cls::rbd::MIRROR_PEER_DIRECTION_RX) {
-      continue;
-    }
-    m_mirror_peer_uuids.insert(peer.uuid);
-  }
-
-  if (m_mirror_peer_uuids.empty()) {
-    lderr(m_cct) << "no mirror tx peers configured for the pool" << dendl;
-    finish(-EINVAL);
-    return;
-  }
-
-  list_group_images();
-}
-
-
-template <typename I>
-void GroupCreatePrimaryRequest<I>::list_group_images() {
-  ldout(m_cct, 10) << dendl;
-
-  librados::ObjectReadOperation op;
-  cls_client::group_image_list_start(&op, m_start_after, MAX_RETURN);
-
-  auto comp = create_rados_callback<
-    GroupCreatePrimaryRequest<I>,
-    &GroupCreatePrimaryRequest<I>::handle_list_group_images>(this);
-
-  m_outbl.clear();
-  int r = m_group_ioctx.aio_operate(
-    librbd::util::group_header_name(m_group_id), comp, &op, &m_outbl);
-  ceph_assert(r == 0);
-  comp->release();
-}
-
-template <typename I>
-void GroupCreatePrimaryRequest<I>::handle_list_group_images(int r) {
-  ldout(m_cct, 10) << "r=" << r << dendl;
-
-  std::vector<cls::rbd::GroupImageStatus> images;
-  if (r == 0) {
-    auto iter = m_outbl.cbegin();
-    r = cls_client::group_image_list_finish(&iter, &images);
-  }
-
-  if (r < 0) {
-    lderr(m_cct) << "error listing images in group: " << cpp_strerror(r)
-                 << dendl;
-    finish(r);
-    return;
-  }
-
-  auto image_count = images.size();
-  m_images.insert(m_images.end(), images.begin(), images.end());
-  if (image_count == MAX_RETURN) {
-    m_start_after = images.rbegin()->spec;
-    list_group_images();
-    return;
-  }
-
-  open_group_images();
-}
-
-template <typename I>
-void GroupCreatePrimaryRequest<I>::open_group_images() {
-  ldout(m_cct, 10) << dendl;
-
-  if(m_images.empty()) {
-    generate_group_snap();
-    return;
-  }
 
   auto ctx = librbd::util::create_context_callback<
     GroupCreatePrimaryRequest<I>,
-    &GroupCreatePrimaryRequest<I>::handle_open_group_images>(this);
-  auto gather_ctx = new C_Gather(m_cct, ctx);
+    &GroupCreatePrimaryRequest<I>::handle_prepare_group_images>(this);
 
-  int r = 0;
-  for (size_t i = 0; i < m_images.size(); i++) {
-    auto &image = m_images[i];
-    librbd::IoCtx image_io_ctx;
-    r = librbd::util::create_ioctx(m_group_ioctx, "image",
-                                   image.spec.pool_id, {},
-                                   &image_io_ctx);
-    if (r < 0) {
-      m_ret_code = r;
-      break;
-    }
-
-    librbd::ImageCtx* image_ctx = new ImageCtx("", image.spec.image_id.c_str(),
-                                               nullptr, image_io_ctx, false);
-
-    m_image_ctxs.push_back(image_ctx);
-    image_ctx->state->open(0, gather_ctx->new_sub());
-  }
-
-  gather_ctx->activate();
+  auto req = snapshot::GroupPrepareImagesRequest<I>::create(m_group_ioctx, m_group_id, m_image_ctxs,
+                                                            m_images, nullptr, nullptr,
+                                                            &m_mirror_peer_uuids, nullptr,
+                                                            "create", false, ctx);
+  req->send();
 }
 
 template <typename I>
-void GroupCreatePrimaryRequest<I>::handle_open_group_images(int r) {
+void GroupCreatePrimaryRequest<I>::handle_prepare_group_images(int r) {
   ldout(m_cct, 10) << "r=" << r << dendl;
 
-  if (r < 0 && m_ret_code == 0) {
+  if (r < 0) {
+    lderr(m_cct) << "failed to prepare group images" << dendl;
     m_ret_code = r;
-  }
-
-  if (m_ret_code < 0) {
-    lderr(m_cct) << "failed to open group images: " << cpp_strerror(m_ret_code)
-                 << dendl;
     close_images();
     return;
   }

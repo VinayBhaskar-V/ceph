@@ -38,7 +38,7 @@ GroupPrepareImagesRequest<I>::GroupPrepareImagesRequest(
     librados::IoCtx& group_ioctx, const std::string& group_id,
     std::vector<librbd::ImageCtx *>& image_ctxs,
     std::vector<cls::rbd::GroupImageStatus>& images,
-    std::vector<cls::rbd::MirrorImage>& mirror_images,
+    std::vector<cls::rbd::MirrorImage>* mirror_images,
     std::vector<bool>* is_primary,
     std::set<std::string>* mirror_peer_uuids,
     std::vector<mirror::PromotionState>* images_promotion_states,
@@ -160,7 +160,7 @@ void GroupPrepareImagesRequest<I>::handle_list_group_images(int r) {
     return;
   }
 
-  if(m_images.empty()) {
+  if (m_images.empty()) {
     finish(0);
     return;
   }
@@ -180,7 +180,7 @@ void GroupPrepareImagesRequest<I>::check_mirror_images_disabled() {
     &GroupPrepareImagesRequest<I>::handle_check_mirror_images_disabled>(this);
   auto gather_ctx = new C_Gather(m_cct, ctx);
 
-  m_mirror_images.resize(m_images.size());
+  m_mirror_images->resize(m_images.size());
   m_out_bls.resize(m_images.size());
   for (size_t i = 0; i < m_images.size(); i++) {
     librados::ObjectReadOperation op;
@@ -190,7 +190,7 @@ void GroupPrepareImagesRequest<I>::check_mirror_images_disabled() {
       [this, i, new_sub_ctx=gather_ctx->new_sub()](int r) {
         if (r == 0) {
           auto iter = m_out_bls[i].cbegin();
-          r = cls_client::mirror_image_get_finish(&iter, &m_mirror_images[i]);
+          r = cls_client::mirror_image_get_finish(&iter, &(*m_mirror_images)[i]);
         }
 
         if (r == -ENOENT) {
@@ -293,7 +293,7 @@ void GroupPrepareImagesRequest<I>::handle_open_group_images(int r) {
     return;
   }
 
-  if (m_api_name == "enable" || m_api_name == "create snapshot") {
+  if (m_api_name == "enable" || m_api_name == "create") {
     finish(0);
     return;
   }
@@ -356,7 +356,7 @@ void GroupPrepareImagesRequest<I>::get_images_mirror_info() {
     &GroupPrepareImagesRequest<I>::handle_get_images_mirror_info>(this);
   auto gather_ctx = new C_Gather(m_cct, ctx);
 
-  m_mirror_images.resize(m_images.size());
+  m_mirror_images->resize(m_images.size());
   m_images_promotion_states->resize(m_images.size());
   m_images_primary_mirror_uuids.resize(m_images.size());
   for (size_t i = 0; i < m_images.size(); i++) {
@@ -368,7 +368,7 @@ void GroupPrepareImagesRequest<I>::get_images_mirror_info() {
                            << dendl;
           new_sub_ctx->complete(r);
           return;
-        } else if (m_mirror_images[i].state != cls::rbd::MIRROR_IMAGE_STATE_ENABLED) {
+        } else if ((*m_mirror_images)[i].state != cls::rbd::MIRROR_IMAGE_STATE_ENABLED) {
           lderr(image_cct) << "mirroring is not currently enabled" << dendl;
           new_sub_ctx->complete(-EINVAL);
           return;
@@ -406,7 +406,7 @@ void GroupPrepareImagesRequest<I>::get_images_mirror_info() {
 
         new_sub_ctx->complete(0);
       });
-    auto req = GetInfoRequest<I>::create(*m_image_ctxs[i], &m_mirror_images[i],
+    auto req = GetInfoRequest<I>::create(*m_image_ctxs[i], &(*m_mirror_images)[i],
                                          &(*m_images_promotion_states)[i],
                                          &m_images_primary_mirror_uuids[i], info_ctx);
     req->send();

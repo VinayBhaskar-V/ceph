@@ -131,7 +131,7 @@ void GroupEnableRequest<I>::prepare_group_images() {
     &GroupEnableRequest<I>::handle_prepare_group_images>(this);
 
   auto req = snapshot::GroupPrepareImagesRequest<I>::create(m_group_ioctx, m_group_id, m_image_ctxs,
-                                                            m_images, m_mirror_images, nullptr,
+                                                            m_images, &m_mirror_images, nullptr,
                                                             &m_mirror_peer_uuids, nullptr, "enable", false, ctx);
   req->send();
 }
