@@ -110,7 +110,7 @@ private:
   std::vector<cls::rbd::GroupSnapshot> m_remote_group_snaps;
   std::vector<std::pair<std::string, ImageReplayer<ImageCtxT> *>> m_replayers_by_image_id;
   const cls::rbd::GroupSnapshot* m_last_local_snap = nullptr;
-
+  std::shared_ptr<std::vector<cls::rbd::GroupSnapshot>> m_prune_group_snaps;
   bool m_update_group_state = true;
 
   Context* m_load_snapshots_task = nullptr;
@@ -131,6 +131,7 @@ private:
 
   bool m_check_creating_snaps = true; // check and identify creating snaps just after restart
   bool m_resync_requested = false;
+  bool m_refresh_snaps = false;
 
   bool is_replay_interrupted(std::unique_lock<ceph::mutex>* locker);
 
@@ -250,15 +251,27 @@ private:
   bool prune_all_image_snapshots(
       cls::rbd::GroupSnapshot *local_snap,
       std::unique_lock<ceph::mutex>* locker);
-  void prune_user_group_snapshots(std::unique_lock<ceph::mutex>* locker);
-  void prune_mirror_group_snapshots(std::unique_lock<ceph::mutex>* locker);
-  void prune_group_snapshots(std::unique_lock<ceph::mutex>* locker);
+
   void prune_creating_group_snapshots_if_any(
-      std::unique_lock<ceph::mutex>* locker,
-      std::shared_ptr<std::vector<cls::rbd::GroupSnapshot>> prune_group_snaps);
+      std::shared_ptr<std::vector<cls::rbd::GroupSnapshot>> prune_creating_snaps);
   void handle_prune_creating_group_snapshots_if_any(
       const std::vector<cls::rbd::GroupImageStatus>& local_images,
-      const std::vector<cls::rbd::GroupSnapshot>& prune_group_snaps);
+      const std::vector<cls::rbd::GroupSnapshot>& prune_creating_snaps);
+
+  void prune_group_snapshots(std::unique_lock<ceph::mutex>* locker,
+                             Context* on_finish);
+  void handle_prune_group_snapshots(int r);
+
+  void prune_user_group_snapshots(std::unique_lock<ceph::mutex>* locker,
+                                  Context* on_finish);
+  void handle_prune_user_group_snapshots(int r, Context* on_finish);
+
+  void prune_mirror_group_snapshots(std::unique_lock<ceph::mutex>* locker,
+                                    Context* on_finish);
+  void handle_prune_mirror_group_snapshots(int r, Context* on_finish);
+
+  void prune_group_snapshot(cls::rbd::GroupSnapshot* snap, Context* on_finish,
+                            std::unique_lock<ceph::mutex>* locker);
 
   void get_replayers_by_image_id(std::unique_lock<ceph::mutex>* locker);
   std::string get_global_image_id(ImageReplayer<ImageCtxT>* image_replayer,
