@@ -607,12 +607,7 @@ void Replayer<I>::handle_load_remote_group_snapshots(int r) {
   }
 
   if (m_last_local_snap && !m_retry_validate_snap) {
-    m_in_flight_op_tracker.start_op();
-    auto ctx = new LambdaContext([this](int r) {
-      handle_prune_group_snapshots(r);
-      m_in_flight_op_tracker.finish_op();
-    });
-    prune_group_snapshots(&locker, ctx);
+    prune_group_snapshots(&locker);
     return;
   }
 
@@ -622,31 +617,6 @@ void Replayer<I>::handle_load_remote_group_snapshots(int r) {
   }
 
   is_resync_requested();
-}
-
-template <typename I>
-void Replayer<I>::handle_prune_group_snapshots(int r) {
-  dout(10) << "r=" << r << dendl;
-
-  std::unique_lock locker{m_lock};
-  if (is_replay_interrupted(&locker)) {
-    return;
-  }
-
-  // retry later
-  if (r == -EAGAIN) {
-    locker.unlock();
-    schedule_load_group_snapshots();
-    return;
-  }
-
-  if (m_refresh_snaps) {
-    m_refresh_snaps = false;
-    load_local_group_snapshots(&locker);
-    return;
-  }
-
-  check_local_group_snapshots(&locker);
 }
 
 template <typename I>
@@ -1268,12 +1238,9 @@ void Replayer<I>::post_mirror_snapshot_created(
       }
       if (!user_snap_found) {
         // there is a user group snap removed on remote, so lets wait for it to removed locally
-        m_in_flight_op_tracker.start_op();
-        Context* ctx = new LambdaContext([this](int r) {
-          handle_prune_group_snapshots(r);
-          m_in_flight_op_tracker.finish_op();
-        });
-        prune_group_snapshots(&locker, ctx);
+        prune_group_snapshot(&(*local_snap), &locker);
+        locker.unlock();
+        on_finish->complete(-EAGAIN);
         return;
       }
     }
@@ -1974,25 +1941,11 @@ void Replayer<I>::handle_prune_creating_group_snapshots_if_any(
 
 template <typename I>
 void Replayer<I>::prune_group_snapshots(
-    std::unique_lock<ceph::mutex>* locker,
-    Context* on_finish) {
+    std::unique_lock<ceph::mutex>* locker) {
   dout(10) << dendl;
 
-  auto ctx = new LambdaContext([this, on_finish](int r) {
-    handle_prune_user_group_snapshots(r, on_finish);
-  });
-
-  prune_user_group_snapshots(locker, ctx);
-}
-
-template <typename I>
-void Replayer<I>::prune_user_group_snapshots(
-    std::unique_lock<ceph::mutex>* locker,
-    Context* on_finish) {
-  dout(20) << dendl;
-
-  auto gather = new C_Gather(g_ceph_context, on_finish);
   bool pruning_started = false;
+  // first prune user snapshots if required
   for (auto local_snap = m_local_group_snaps.begin();
       local_snap != m_local_group_snaps.end(); ++local_snap) {
     auto snap_type = cls::rbd::get_group_snap_namespace_type(
@@ -2018,109 +1971,44 @@ void Replayer<I>::prune_user_group_snapshots(
     dout(10) << "pruning user group snap in-progress: " << local_snap->name
              << ", with id: " << local_snap->id << dendl;
 
-    Context* ctx = gather->new_sub();
-
-    prune_group_snapshot(&(*local_snap), ctx, locker);
-
+    prune_group_snapshot(&(*local_snap), locker);
     // prune one user snapshot at a time
     break;
   }
 
-  locker->unlock();
-  if (!pruning_started) {
-    on_finish->complete(0);
+  if (pruning_started) {
+    load_local_group_snapshots(locker);
     return;
   }
 
-  gather->activate();
-}
-
-template <typename I>
-void Replayer<I>::handle_prune_user_group_snapshots(
-    int r, Context* on_finish) {
-  dout(20) << "r=" << r << dendl;
-
-  std::unique_lock locker{m_lock};
-  if (is_replay_interrupted(&locker)) {
-    locker.unlock();
-    on_finish->complete(-ECANCELED);
-    return;
-  }
-
-  if (m_refresh_snaps) {
-    locker.unlock();
-    on_finish->complete(0);
-    return;
-  }
-
-  // image snapshot pruning still in progress
-  if (r == -EAGAIN) {
-    locker.unlock();
-    on_finish->complete(r);
-    return;
-  }
-
-  auto ctx = new LambdaContext([this, on_finish](int r) {
-    handle_prune_mirror_group_snapshots(r, on_finish);
-  });
-
-  prune_mirror_group_snapshots(&locker, ctx);
+  prune_mirror_group_snapshots(locker);
 }
 
 template <typename I>
 void Replayer<I>::prune_mirror_group_snapshots(
-    std::unique_lock<ceph::mutex>* locker,
-    Context* on_finish) {
+    std::unique_lock<ceph::mutex>* locker) {
   dout(20) << dendl;
 
-  auto gather = new C_Gather(g_ceph_context, on_finish);
-  bool pruning_started = false;
-  for (auto& local_snap : *m_prune_group_snaps) {
-
-    pruning_started = true;
+  if (!m_prune_group_snaps->empty()) {
+    // prune only one mirror group snapshot at a time
+    auto it = m_prune_group_snaps->begin();
+    auto& local_snap = *it;
     mirror_group_snapshot_unlink_peer(local_snap.id);
 
     dout(10) << "pruning mirror group snap in-progress: " << local_snap.name
              << ", with id: " << local_snap.id << dendl;
 
-    Context* ctx = gather->new_sub();
-    prune_group_snapshot(&local_snap, ctx, locker);
-
-    // prune one mirror snapshot at a time
-    break;
-  }
-
-  locker->unlock();
-  if (!pruning_started) {
-    on_finish->complete(0);
+    prune_group_snapshot(&local_snap, locker);
+    load_local_group_snapshots(locker);
     return;
   }
 
-  gather->activate();
-}
-
-template <typename I>
-void Replayer<I>::handle_prune_mirror_group_snapshots(
-    int r, Context* on_finish) {
-  dout(20) << "r=" << r << dendl;
-
-  {
-    std::unique_lock locker{m_lock};
-
-    if (is_replay_interrupted(&locker)) {
-      locker.unlock();
-      on_finish->complete(-ECANCELED);
-      return;
-    }
-  }
-
-  on_finish->complete(r);
+  check_local_group_snapshots(locker);
 }
 
 template <typename I>
 void Replayer<I>::prune_group_snapshot(
     cls::rbd::GroupSnapshot* snap,
-    Context* on_finish,
     std::unique_lock<ceph::mutex>* locker) {
   dout(20) << "snap=" << snap->id << dendl;
 
@@ -2128,7 +2016,6 @@ void Replayer<I>::prune_group_snapshot(
   if (!prune_all_image_snapshots(snap, locker)) {
     dout(20) << "image snapshot pruning still in progress for "
              << snap->id << dendl;
-    on_finish->complete(-EAGAIN);
     return;
   }
 
@@ -2146,7 +2033,6 @@ void Replayer<I>::prune_group_snapshot(
     r = 0;
   }
 
-  on_finish->complete(r);
 }
 
 template <typename I>

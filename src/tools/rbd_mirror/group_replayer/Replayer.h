@@ -258,19 +258,12 @@ private:
       const std::vector<cls::rbd::GroupImageStatus>& local_images,
       const std::vector<cls::rbd::GroupSnapshot>& prune_creating_snaps);
 
-  void prune_group_snapshots(std::unique_lock<ceph::mutex>* locker,
-                             Context* on_finish);
+  void prune_group_snapshots(std::unique_lock<ceph::mutex>* locker);
   void handle_prune_group_snapshots(int r);
 
-  void prune_user_group_snapshots(std::unique_lock<ceph::mutex>* locker,
-                                  Context* on_finish);
-  void handle_prune_user_group_snapshots(int r, Context* on_finish);
+  void prune_mirror_group_snapshots(std::unique_lock<ceph::mutex>* locker);
 
-  void prune_mirror_group_snapshots(std::unique_lock<ceph::mutex>* locker,
-                                    Context* on_finish);
-  void handle_prune_mirror_group_snapshots(int r, Context* on_finish);
-
-  void prune_group_snapshot(cls::rbd::GroupSnapshot* snap, Context* on_finish,
+  void prune_group_snapshot(cls::rbd::GroupSnapshot* snap,
                             std::unique_lock<ceph::mutex>* locker);
 
   void get_replayers_by_image_id(std::unique_lock<ceph::mutex>* locker);
