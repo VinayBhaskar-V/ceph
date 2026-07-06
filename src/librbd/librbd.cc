@@ -7947,6 +7947,11 @@ extern "C" int rbd_group_snap_list2(rados_ioctx_t group_p,
   std::vector<librbd::group_snap_info2_t> cpp_snaps;
   int r = librbd::api::Group<>::snap_list(group_ioctx, group_name, true, false,
                                           &cpp_snaps);
+  if (r == -ENOENT) {
+    *snaps_size = 0;
+    return 0;
+  }
+
   if (r < 0) {
     return r;
   }
